@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Bouncing Ball Evolution</title>
+<style>
+    body {
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #0a0a1f;
+        font-family: Arial, sans-serif;
+        overflow: hidden;
+    }
+    canvas {
+        border: 2px solid #00ffcc;
+        border-radius: 12px;
+        box-shadow: 0 0 40px rgba(0, 255, 204, 0.4);
+    }
+    .info {
+        position: absolute;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: #00ffcc;
+        font-size: 18px;
+        text-shadow: 0 0 10px #00ffcc;
+        pointer-events: none;
+    }
+</style>
+</head>
+<body>
+
+<div class="info" id="info">Triangle • Speed: 1.0 • Bounces: 0</div>
+<canvas id="canvas" width="800" height="800"></canvas>
+
+<script>
+// Canvas setup
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const info = document.getElementById('info');
+
+const WIDTH = 800;
+const HEIGHT = 800;
+const CENTER_X = WIDTH / 2;
+const CENTER_Y = HEIGHT / 2;
+const MAX_RADIUS = 320;
+
+// Animation variables
+let numSides = 3;
+let ball = {
+    x: CENTER_X,
+    y: CENTER_Y,
+    radius: 12,
+    vx: 3.5,
+    vy: -2.8,
+    speed: 4.5
+};
+
+let bounces = 0;
+let rotation = 0; // slow rotation for visual appeal
+
+// Utility functions
+function getPolygonPoints(sides, radius, offset = 0) {
+    const points = [];
+    for (let i = 0; i < sides; i++) {
+        const angle = (2 * Math.PI * i / sides) + offset;
+        points.push({
+            x: CENTER_X + radius * Math.cos(angle),
+            y: CENTER_Y + radius * Math.sin(angle)
+        });
+    }
+    return points;
+}
+
+function drawPolygon(sides, radius, color) {
+    const points = getPolygonPoints(sides, radius, rotation);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 6;
+    ctx.lineJoin = "round";
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = "#00ffcc";
+    
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i].x, points[i].y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+}
+
+function drawBall() {
+    ctx.shadowBlur = 30;
+    ctx.shadowColor = "#ffff00";
+    
+    // Glow
+    ctx.fillStyle = "rgba(255, 255, 100, 0.3)";
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ball.radius + 18, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Ball
+    ctx.fillStyle = "#ffff00";
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Highlight
+    ctx.fillStyle = "rgba(255,255,255,0.8)";
+    ctx.beginPath();
+    ctx.arc(ball.x - 5, ball.y - 5, 5, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+// Line segment reflection helper
+function reflectVelocity(vx, vy, nx, ny) {
+    const dot = vx * nx + vy * ny;
+    return {
+        vx: vx - 2 * dot * nx,
+        vy: vy - 2 * dot * ny
+    };
+}
+
+// Check and handle collision with a line segment
+function checkCollisionWithEdge(x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    const ux = dx / len;
+    const uy = dy / len;
+    
+    // Normal vector (inward pointing - rotated 90 degrees counterclockwise)
+    let nx = -uy;
+    let ny = ux;
+    
+    // Vector from point1 to ball
+    const bx = ball.x - x1;
+    const by = ball.y - y1;
+    
+    // Project ball onto line
+    const proj = bx * ux + by * uy;
+    if (proj < 0 || proj > len) return false;
+    
+    // Distance from ball to line
+    const dist = bx * nx + by * ny;
+    const absDist = Math.abs(dist);
+    
+    if (absDist < ball.radius && Math.abs(dist) < ball.radius + 8) {
+        // Reflect
+        const reflection = reflectVelocity(ball.vx, ball.vy, nx, ny);
+        ball.vx = reflection.vx;
+        ball.vy = reflection.vy;
+        
+        // Push ball out slightly
+        const push = (ball.radius - absDist + 2) * (dist > 0 ? 1 : -1);
+        ball.x += nx * push;
+        ball.y += ny * push;
+        
+        // Increase speed
+        const currentSpeed = Math.sqrt(ball.vx*ball.vx + ball.vy*ball.vy);
+        const newSpeed = currentSpeed * 1.12;
+        const ratio = newSpeed / currentSpeed;
+        ball.vx *= ratio;
+        ball.vy *= ratio;
+        
+        return true;
+    }
+    return false;
+}
+
+function update() {
+    // Move ball
+    ball.x += ball.vx;
+    ball.y += ball.vy;
+    
+    // Get current polygon
+    const radius = MAX_RADIUS;
+    const points = getPolygonPoints(numSides, radius, rotation);
+    
+    // Check collisions with all edges
+    let collided = false;
+    for (let i = 0; i < points.length; i++) {
+        const p1 = points[i];
+        const p2 = points[(i + 1) % points.length];
+        
+        if (checkCollisionWithEdge(p1.x, p1.y, p2.x, p2.y)) {
+            collided = true;
+        }
+    }
+    
+    if (collided) {
+        bounces++;
+        
+        // Increase sides (max 12)
+        if (numSides < 12) {
+            numSides++;
+        }
+        
+        // Update info
+        info.textContent = `${numSides}-gon • Speed: ${(Math.sqrt(ball.vx*ball.vx + ball.vy*ball.vy)).toFixed(1)} • Bounces: ${bounces}`;
+    }
+    
+    // Gentle rotation
+    rotation += 0.002;
+    
+    // Very light damping (optional)
+    ball.vx *= 0.998;
+    ball.vy *= 0.998;
+}
+
+function draw() {
+    // Background
+    ctx.fillStyle = "#0a0a1f";
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    
+    // Draw polygon
+    drawPolygon(numSides, MAX_RADIUS, "#00ffcc");
+    
+    // Draw center dot
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(CENTER_X, CENTER_Y, 3, 0, Math.PI * 2);
+    ctx.fill();
+    
+    drawBall();
+}
+
+function animate() {
+    update();
+    draw();
+    requestAnimationFrame(animate);
+}
+
+// Start animation
+animate();
+
+// Click to reset
+canvas.addEventListener('click', () => {
+    if (numSides >= 12) {
+        numSides = 3;
+        bounces = 0;
+        ball.x = CENTER_X;
+        ball.y = CENTER_Y;
+        ball.vx = 3.5 + Math.random() * 2 - 1;
+        ball.vy = -2.8 + Math.random() * 2 - 1;
+        info.textContent = `Triangle • Speed: 1.0 • Bounces: 0`;
+    }
+});
+
+</script>
+
+<p style="position:absolute;bottom:20px;color:#555;text-align:center;width:100%;">
+    Click the canvas to reset when it reaches maximum sides • Pure HTML + Canvas
+</p>
+
+</body>
+</html>

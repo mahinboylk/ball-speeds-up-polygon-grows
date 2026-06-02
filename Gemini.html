@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shape Shifting Collision Animation</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #111;
+            color: #fff;
+            font-family: system-ui, -apple-system, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #ui-container {
+            position: absolute;
+            top: 30px;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px 30px;
+            border-radius: 20px;
+            border: 1px solid #333;
+        }
+        h2 {
+            margin: 0;
+            font-weight: 400;
+            font-size: 1.2rem;
+            letter-spacing: 1px;
+        }
+        span.highlight {
+            color: #00ffcc;
+            font-weight: bold;
+            font-family: monospace;
+            font-size: 1.4rem;
+        }
+        canvas {
+            background-color: #1e1e1e;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 255, 204, 0.1);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-container">
+        <h2>Sides: <span id="sides" class="highlight">3</span> &nbsp;|&nbsp; Speed: <span id="speed" class="highlight">3.0</span>x</h2>
+    </div>
+
+    <canvas id="simCanvas" width="600" height="600"></canvas>
+
+    <script>
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+        const sidesEl = document.getElementById('sides');
+        const speedEl = document.getElementById('speed');
+
+        // Initial State
+        let numSides = 3;
+        const polygonRadius = 250; // The radius of the circle the polygon fits inside
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+
+        const ball = {
+            x: cx,
+            y: cy,
+            radius: 8,
+            speed: 3,
+            vx: 0,
+            vy: 0
+        };
+
+        // Give the ball a random starting direction
+        const angle = Math.random() * Math.PI * 2;
+        ball.vx = Math.cos(angle) * ball.speed;
+        ball.vy = Math.sin(angle) * ball.speed;
+
+        // Calculate the corners of the shape based on the current number of sides
+        function getVertices(sides) {
+            const verts = [];
+            const offset = -Math.PI / 2; // Start pointing straight up
+            for (let i = 0; i < sides; i++) {
+                const theta = offset + (i * 2 * Math.PI) / sides;
+                verts.push({
+                    x: cx + Math.cos(theta) * polygonRadius,
+                    y: cy + Math.sin(theta) * polygonRadius
+                });
+            }
+            return verts;
+        }
+
+        // Find the closest point on a line segment to the ball (for collision detection)
+        function closestPointOnSegment(p, a, b) {
+            const abx = b.x - a.x;
+            const aby = b.y - a.y;
+            // Calculate projection scalar
+            let t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / (abx * abx + aby * aby);
+            t = Math.max(0, Math.min(1, t)); // Clamp to the line segment
+            return { 
+                x: a.x + t * abx, 
+                y: a.y + t * aby 
+            };
+        }
+
+        function update() {
+            // Move the ball
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+
+            const vertices = getVertices(numSides);
+
+            // Check for collisions against all current walls
+            for (let i = 0; i < numSides; i++) {
+                const a = vertices[i];
+                const b = vertices[(i + 1) % numSides]; // Loop back to the first vertex
+                const closest = closestPointOnSegment(ball, a, b);
+
+                // Distance from ball to the closest point on the wall
+                const dx = ball.x - closest.x;
+                const dy = ball.y - closest.y;
+                const dist = Math.hypot(dx, dy);
+
+                // If collision occurs
+                if (dist < ball.radius) {
+                    // Normal vector pointing perpendicular to the wall
+                    const nx = dx / dist;
+                    const ny = dy / dist;
+                    
+                    // Dot product to determine if moving towards the wall
+                    const dot = ball.vx * nx + ball.vy * ny;
+
+                    if (dot < 0) {
+                        // 1. Reflect velocity (Bounce)
+                        ball.vx -= 2 * dot * nx;
+                        ball.vy -= 2 * dot * ny;
+
+                        // 2. Increase Speed (by 6% per hit)
+                        ball.speed = Math.min(ball.speed * 1.06, 25); // Capped at 25px per frame to stop clipping
+                        const vLen = Math.hypot(ball.vx, ball.vy);
+                        ball.vx = (ball.vx / vLen) * ball.speed;
+                        ball.vy = (ball.vy / vLen) * ball.speed;
+
+                        // 3. Push ball safely out of the wall so it doesn't get stuck
+                        ball.x = closest.x + nx * ball.radius;
+                        ball.y = closest.y + ny * ball.radius;
+
+                        // 4. Add a side to the shape
+                        numSides++;
+                        
+                        // Update UI
+                        sidesEl.innerText = numSides;
+                        speedEl.innerText = ball.speed.toFixed(1);
+                        
+                        break; // Only process one collision per frame
+                    }
+                }
+            }
+
+            draw(vertices);
+            requestAnimationFrame(update); // Loop the animation
+        }
+
+        function draw(vertices) {
+            // Fade the background slightly instead of clearing it to create a motion trail effect
+            ctx.fillStyle = 'rgba(30, 30, 30, 0.4)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw the polygon walls
+            ctx.beginPath();
+            ctx.moveTo(vertices[0].x, vertices[0].y);
+            for (let i = 1; i < vertices.length; i++) {
+            }
+            ctx.closePath();
+            ctx.strokeStyle = '#00ffcc';
+            ctx.lineWidth = 3;
+            
+            // Add a neon glow to the walls
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#00ffcc';
+            ctx.stroke();
+
+            // Draw the ball
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+            ctx.fillStyle = '#ff0055';
+            
+            // Add a neon glow to the ball
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = '#ff0055';
+            ctx.fill();
+            
+            // Reset shadows so they don't apply to the fade effect next frame
+            ctx.shadowBlur = 0;
+        }
+
+        // Start the engine
+        update();
+    </script>
+</body>
+</html>

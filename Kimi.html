@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polygon Escalation</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    overflow: hidden;
+    background: #020208;
+    color: #e0f0ff;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  }
+  canvas { display: block; }
+  #ui {
+    position: absolute;
+    top: 24px;
+    left: 24px;
+    pointer-events: none;
+    user-select: none;
+  }
+  #ui h1 {
+    font-size: 1.3rem;
+    font-weight: 300;
+    letter-spacing: 3px;
+    color: #a0f0ff;
+    text-shadow: 0 0 12px rgba(0,255,255,0.4);
+    margin-bottom: 12px;
+  }
+  .stat {
+    font-size: 0.95rem;
+    margin: 6px 0;
+    opacity: 0.9;
+    text-shadow: 0 0 6px rgba(0,0,0,0.8);
+  }
+  .stat span {
+    color: #ff66aa;
+    font-weight: 700;
+    font-size: 1.05rem;
+  }
+  #hint {
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.8rem;
+    opacity: 0.5;
+    pointer-events: none;
+    letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+<<canvas id="c"></canvas>
+<div id="ui">
+  <h1>POLYGON ESCALATION</h1>
+  <div class="stat">Sides: <span id="sides">3</span></div>
+  <div class="stat">Speed: <span id="speed">0.0</span></div>
+  <div class="stat">Collisions: <span id="hits">0</span></div>
+</div>
+<div id="hint">Click anywhere to reset</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+const uiSides = document.getElementById('sides');
+const uiSpeed = document.getElementById('speed');
+const uiHits = document.getElementById('hits');
+
+/* ─── Utilities ─── */
+function hypot(x, y) { return Math.sqrt(x*x + y*y); }
+
+function closestPointOnSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len2 = dx*dx + dy*dy;
+  if (len2 === 0) return {x: x1, y: y1};
+  let t = ((px - x1)*dx + (py - y1)*dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return {x: x1 + t*dx, y: y1 + t*dy};
+}
+
+/* ─── Particle ─── */
+class Particle {
+  constructor(x, y, vx, vy, hue) {
+    this.x = x; this.y = y;
+    this.vx = vx; this.vy = vy;
+    this.life = 1.0;
+    this.decay = 0.02 + Math.random()*0.04;
+    this.hue = hue;
+    this.size = 1.5 + Math.random()*2.5;
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.life -= this.decay;
+    this.size *= 0.96;
+  }
+  draw(ctx) {
+    if (this.life <= 0) return;
+    ctx.globalAlpha = this.life * 0.8;
+    ctx.fillStyle = `hsl(${this.hue}, 100%, 65%)`;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
+let particles = [];
+
+/* ─── Polygon ─── */
+class Polygon {
+  constructor(sides) {
+    this.sides = sides;
+    this.setSize();
+    this.vertices = this.computeVertices();
+    this.cooldowns = new Array(sides).fill(0);
+    this.hue = 180;
+    this.pulse = 0;
+  }
+  
+  setSize() {
+    this.apothem = Math.min(W, H) * 0.36;
+  }
+  
+  computeVertices() {
+    const R = this.apothem / Math.cos(Math.PI / this.sides);
+    const verts = [];
+    const start = -Math.PI/2; // vertex at top
+    for (let i = 0; i < this.sides; i++) {
+      const a = start + (i * 2*Math.PI / this.sides);
+      verts.push({
+        x: W/2 + R * Math.cos(a),
+        y: H/2 + R * Math.sin(a)
+      });
+    }
+    return verts;
+  }
+  
+  addSide() {
+    this.sides++;
+    this.hue = (this.hue + 30) % 360;
+    this.pulse = 1.0;
+    this.vertices = this.computeVertices();
+    this.cooldowns = new Array(this.sides).fill(0);
+  }
+  
+  update() {
+    if (this.pulse > 0) this.pulse -= 0.025;
+    for (let i = 0; i < this.sides; i++) {
+      if (this.cooldowns[i] > 0) this.cooldowns[i]--;
+    }
+  }
+  
+  draw(ctx) {
+    ctx.save();
+    ctx.shadowBlur = 15 + this.pulse*25;
+    ctx.shadowColor = `hsl(${this.hue}, 100%, 45%)`;
+    ctx.strokeStyle = `hsl(${this.hue}, 100%, 55%)`;
+    ctx.lineWidth = 2.5 + this.pulse*2;
+    ctx.lineJoin = 'round';
+    
+    ctx.beginPath();
+    ctx.moveTo(this.vertices[0].x, this.vertices[0].y);
+    for (let i = 1; i < this.sides; i++) {
+      ctx.lineTo(this.vertices[i].x, this.vertices[i].y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    
+    ctx.fillStyle = `hsla(${this.hue}, 100%, 50%, 0.025)`;
+    ctx.fill();
+    ctx.restore();
+  }
+  
+  /* Returns edge index on collision, otherwise -1 */
+  checkCollision(ball) {
+    for (let i = 0; i < this.sides; i++) {
+      if (this.cooldowns[i] > 0) continue;
+      
+      const v1 = this.vertices[i];
+      const v2 = this.vertices[(i+1) % this.sides];
+      const cp = closestPointOnSegment(ball.x, ball.y, v1.x, v1.y, v2.x, v2.y);
+      const d = hypot(ball.x - cp.x, ball.y - cp.y);
+      
+      if (d < ball.radius) {
+        // Inward normal (wall -> interior)
+        let nx = ball.x - cp.x;
+        let ny = ball.y - cp.y;
+        let nlen = hypot(nx, ny);
+        
+        if (nlen === 0) {
+          // Ball center exactly on segment; compute edge normal toward center
+          const ex = v2.x - v1.x, ey = v2.y - v1.y;
+          const mx = (v1.x + v2.x)/2, my = (v1.y + v2.y)/2;
+          const cx = W/2 - mx, cy = H/2 - my;
+          nx = -ey; ny = ex;
+          if (nx*cx + ny*cy < 0) { nx = ey; ny = -ex; }
+          nlen = hypot(nx, ny);
+        }
+        
+        if (nlen > 0) { nx /= nlen; ny /= nlen; }
+        
+        // Only reflect if moving toward the wall
+        const dot = ball.vx*nx + ball.vy*ny;
+        if (dot < 0) {
+          // Reflect velocity across normal
+          ball.vx -= 2*dot*nx;
+          ball.vy -= 2*dot*ny;
+          
+          // Slight random perturbation to break loops
+          const ang = (Math.random()-0.5)*0.08;
+          const cosA = Math.cos(ang), sinA = Math.sin(ang);
+          const vx = ball.vx*cosA - ball.vy*sinA;
+          const vy = ball.vx*sinA + ball.vy*cosA;
+          ball.vx = vx; ball.vy = vy;
+          
+          // Increase speed
+          const spd = hypot(ball.vx, ball.vy);
+          const target = Math.min(spd*1.1, 22);
+          ball.vx = (ball.vx/spd)*target;
+          ball.vy = (ball.vy/spd)*target;
+          
+          // Push out of wall
+          const overlap = ball.radius - d + 0.5;
+          ball.x += nx*overlap;
+          ball.y += ny*overlap;
+          
+          // Cooldown to avoid sticky collisions
+          this.cooldowns[i] = 8;
+          
+          // Spawn particles
+          for (let k = 0; k < 10; k++) {
+            const a = Math.random()*Math.PI*2;
+            const s = Math.random()*4 + 1;
+            particles.push(new Particle(
+              cp.x + nx*2, cp.y + ny*2,
+              nx*s*0.6 + Math.cos(a)*s*0.4,
+              ny*s*0.6 + Math.sin(a)*s*0.4,
+              this.hue
+            ));
+          }
+          return i;
+        } else {
+          // Moving away but penetrating; just push out
+          const overlap = ball.radius - d + 0.5;
+          ball.x += nx*overlap;
+          ball.y += ny*overlap;
+        }
+      }
+    }
+    return -1;
+  }
+  
+  /* Push ball inside if shape change caused penetration */
+  constrain(ball) {
+    for (let iter = 0; iter < 6; iter++) {
+      let worst = 0, wx = 0, wy = 0;
+      for (let i = 0; i < this.sides; i++) {
+        const v1 = this.vertices[i];
+        const v2 = this.vertices[(i+1)%this.sides];
+        const cp = closestPointOnSegment(ball.x, ball.y, v1.x, v1.y, v2.x, v2.y);
+        const d = hypot(ball.x - cp.x, ball.y - cp.y);
+        if (d < ball.radius) {
+          const pen = ball.radius - d;
+          if (pen > worst) {
+            worst = pen;
+            let nx = ball.x - cp.x;
+            let ny = ball.y - cp.y;
+            const nlen = hypot(nx, ny);
+            if (nlen > 0) { nx /= nlen; ny /= nlen; }
+            wx = nx; wy = ny;
+          }
+        }
+      }
+      if (worst > 0) {
+        ball.x += wx*(worst + 0.5);
+        ball.y += wy*(worst + 0.5);
+      } else break;
+    }
+  }
+}
+
+/* ─── Ball ─── */
+class Ball {
+  constructor() {
+    this.reset();
+  }
+  
+  reset() {
+    this.x = W/2;
+    this.y = H/2;
+    const a = Math.random()*Math.PI*2;
+    const s = 4.5;
+    this.vx = Math.cos(a)*s;
+    this.vy = Math.sin(a)*s;
+    this.radius = 7;
+    this.trail = [];
+  }
+  
+  update() {
+    this.trail.push({x: this.x, y: this.y});
+    if (this.trail.length > 20) this.trail.shift();
+    this.x += this.vx;
+    this.y += this.vy;
+  }
+  
+  draw(ctx, hue) {
+    // Trail
+    for (let i = 0; i < this.trail.length; i++) {
+      const t = this.trail[i];
+      const alpha = (i/this.trail.length)*0.35;
+      const r = (i/this.trail.length)*this.radius*0.8;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = `hsl(${hue}, 100%, 60%)`;
+      ctx.beginPath();
+      ctx.arc(t.x, t.y, r, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    
+    // Core
+    ctx.save();
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = `hsl(${hue}, 100%, 50%)`;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+    ctx.fill();
+    
+    ctx.fillStyle = `hsl(${hue}, 100%, 75%)`;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius*0.5, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* ─── State ─── */
+let polygon = new Polygon(3);
+let ball = new Ball();
+let hits = 0;
+
+function reset() {
+  polygon = new Polygon(3);
+  ball.reset();
+  hits = 0;
+  particles = [];
+  uiSides.textContent = '3';
+  uiHits.textContent = '0';
+}
+
+window.addEventListener('mousedown', reset);
+window.addEventListener('touchstart', reset);
+
+/* ─── Loop ─── */
+function loop() {
+  // Motion-blur clear
+  ctx.fillStyle = 'rgba(2, 2, 8, 0.25)';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Background grid (subtle)
+  ctx.strokeStyle = 'rgba(40,60,80,0.08)';
+  ctx.lineWidth = 1;
+  const grid = 60;
+  ctx.beginPath();
+  for (let x = (W/2)%grid; x < W; x += grid) { ctx.moveTo(x,0); ctx.lineTo(x,H); }
+  for (let y = (H/2)%grid; y < H; y += grid) { ctx.moveTo(0,y); ctx.lineTo(W,y); }
+  ctx.stroke();
+  
+  polygon.update();
+  ball.update();
+  
+  const hitEdge = polygon.checkCollision(ball);
+  if (hitEdge !== -1) {
+    hits++;
+    polygon.addSide();
+    polygon.constrain(ball);
+    uiSides.textContent = polygon.sides;
+    uiHits.textContent = hits;
+  }
+  
+  // Particles
+  for (let i = particles.length-1; i >= 0; i--) {
+    particles[i].update();
+    if (particles[i].life <= 0) particles.splice(i, 1);
+  }
+  
+  uiSpeed.textContent = hypot(ball.vx, ball.vy).toFixed(1);
+  
+  // Draw
+  polygon.draw(ctx);
+  for (const p of particles) p.draw(ctx);
+  ball.draw(ctx, polygon.hue);
+  
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>

@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bouncing Ball Polygon</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0a1a;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            min-height: 100vh; font-family: 'Segoe UI', sans-serif;
+            overflow: hidden;
+        }
+        canvas { border-radius: 12px; }
+        #info {
+            color: #fff; margin-top: 16px;
+            font-size: 1rem; opacity: 0.7; letter-spacing: 1px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="info">Sides: <span id="sideCount">3</span> &nbsp;|&nbsp; Speed: <span id="speedDisplay">1.0</span>x &nbsp;|&nbsp; Bounces: <span id="bounceCount">0</span></div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width = 600;
+        const H = canvas.height = 600;
+        const cx = W / 2, cy = H / 2;
+
+        let sides = 3;
+        let bounces = 0;
+        let baseSpeed = 2.5;
+        let speedMultiplier = 1.0;
+
+        let ball = {
+            x: cx, y: cy,
+            vx: baseSpeed * Math.cos(Math.PI / 6),
+            vy: baseSpeed * Math.sin(Math.PI / 6),
+            r: 9,
+            trail: []
+        };
+
+        let polyAngle = 0;
+        let polyRadius = 200;
+        let flashAlpha = 0;
+        let flashColor = '#ffffff';
+        let particles = [];
+        let lastBounced = -1; // FIX: track last bounced side
+
+        const colors = [
+            '#ff6b6b', '#ffd93d', '#6bcb77', '#4d96ff',
+            '#ff922b', '#cc5de8', '#20c997', '#f06595'
+        ];
+
+        function getPolygonVertices(n, r, angle) {
+            const verts = [];
+            for (let i = 0; i < n; i++) {
+                const a = angle + (2 * Math.PI * i / n) - Math.PI / 2;
+                verts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+            }
+            return verts;
+        }
+
+        function reflectVelocity(vx, vy, nx, ny) {
+            const dot = vx * nx + vy * ny;
+            return { vx: vx - 2 * dot * nx, vy: vy - 2 * dot * ny };
+        }
+
+        function distPointToSegment(px, py, ax, ay, bx, by) {
+            const dx = bx - ax, dy = by - ay;
+            const lenSq = dx * dx + dy * dy;
+            let t = ((px - ax) * dx + (py - ay) * dy) / lenSq;
+            t = Math.max(0, Math.min(1, t));
+            const closestX = ax + t * dx;
+            const closestY = ay + t * dy;
+            const distX = px - closestX;
+            const distY = py - closestY;
+            return { dist: Math.sqrt(distX * distX + distY * distY), nx: distX, ny: distY, closestX, closestY };
+        }
+
+        function spawnParticles(x, y, color) {
+            for (let i = 0; i < 18; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 1.5 + Math.random() * 4;
+                particles.push({
+                    x, y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    life: 1.0,
+                    decay: 0.02 + Math.random() * 0.03,
+                    r: 2 + Math.random() * 3,
+                    color
+                });
+            }
+        }
+
+        function updateParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx; p.y += p.vy;
+                p.vx *= 0.95; p.vy *= 0.95;
+                p.life -= p.decay;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+        }
+
+        function drawParticles() {
+            for (const p of particles) {
+                ctx.save();
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.shadowBlur = 8;
+                ctx.shadowColor = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        function drawPolygon(verts, sideIndex) {
+            ctx.save();
+            ctx.shadowBlur = 24;
+            ctx.shadowColor = colors[sides % colors.length];
+            ctx.strokeStyle = colors[sides % colors.length];
+            ctx.lineWidth = 2.5;
+            ctx.globalAlpha = 0.85;
+            ctx.beginPath();
+            ctx.moveTo(verts[0].x, verts[0].y);
+            for (let i = 1; i < verts.length; i++) ctx.lineTo(verts[i].x, verts[i].y);
+            ctx.closePath();
+            ctx.stroke();
+            ctx.restore();
+
+            // FIX: bounds-check sideIndex before accessing verts
+            if (sideIndex >= 0 && sideIndex < verts.length && flashAlpha > 0) {
+                const a = verts[sideIndex];
+                const b = verts[(sideIndex + 1) % verts.length];
+                ctx.save();
+                ctx.globalAlpha = flashAlpha;
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 5;
+                ctx.shadowBlur = 30;
+                ctx.shadowColor = '#ffffff';
+                ctx.beginPath();
+                ctx.moveTo(a.x, a.y);
+                ctx.lineTo(b.x, b.y);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        function drawBall() {
+            for (let i = 0; i < ball.trail.length; i++) {
+                const t = ball.trail[i];
+                const alpha = (i / ball.trail.length) * 0.4;
+                const r = ball.r * (i / ball.trail.length) * 0.8;
+                ctx.save();
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = '#7ecfff';
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = '#7ecfff';
+                ctx.beginPath();
+                ctx.arc(t.x, t.y, r, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            const grad = ctx.createRadialGradient(ball.x - 2, ball.y - 2, 1, ball.x, ball.y, ball.r * 2);
+            grad.addColorStop(0, '#ffffff');
+            grad.addColorStop(0.4, '#7ecfff');
+            grad.addColorStop(1, 'rgba(100,180,255,0)');
+
+            ctx.save();
+            ctx.shadowBlur = 30;
+            ctx.shadowColor = '#7ecfff';
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.r * 2, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function drawBackground() {
+            ctx.fillStyle = '#0a0a1a';
+            ctx.fillRect(0, 0, W, H);
+            const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, 300);
+            bg.addColorStop(0, 'rgba(40,60,120,0.18)');
+            bg.addColorStop(1, 'rgba(10,10,26,0)');
+            ctx.fillStyle = bg;
+            ctx.fillRect(0, 0, W, H);
+        }
+
+        function drawFlash() {
+            if (flashAlpha > 0) {
+                ctx.save();
+                ctx.globalAlpha = flashAlpha * 0.12;
+                ctx.fillStyle = flashColor;
+                ctx.fillRect(0, 0, W, H);
+                ctx.restore();
+                flashAlpha *= 0.82;
+                if (flashAlpha < 0.01) flashAlpha = 0;
+            }
+        }
+
+        function update() {
+            ball.trail.push({ x: ball.x, y: ball.y });
+            if (ball.trail.length > 22) ball.trail.shift();
+
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+
+            const verts = getPolygonVertices(sides, polyRadius, polyAngle);
+
+            for (let i = 0; i < sides; i++) {
+                const a = verts[i];
+                const b = verts[(i + 1) % sides];
+                const result = distPointToSegment(ball.x, ball.y, a.x, a.y, b.x, b.y);
+
+                if (result.dist < ball.r) {
+                    const len = Math.sqrt(result.nx * result.nx + result.ny * result.ny);
+                    const nx = result.nx / len;
+                    const ny = result.ny / len;
+
+                    const overlap = ball.r - result.dist;
+                    ball.x += nx * overlap;
+                    ball.y += ny * overlap;
+
+                    const ref = reflectVelocity(ball.vx, ball.vy, nx, ny);
+                    ball.vx = ref.vx;
+                    ball.vy = ref.vy;
+
+                    speedMultiplier += 0.08;
+                    const currentSpeed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+                    const targetSpeed = baseSpeed * speedMultiplier;
+                    ball.vx = (ball.vx / currentSpeed) * targetSpeed;
+                    ball.vy = (ball.vy / currentSpeed) * targetSpeed;
+
+                    sides++;
+
+                    if (sides > 12) {
+                        sides = 3;
+                        speedMultiplier = 1.0;
+                        ball.x = cx;
+                        ball.y = cy;
+                        const angle = Math.random() * Math.PI * 2;
+                        ball.vx = baseSpeed * Math.cos(angle);
+                        ball.vy = baseSpeed * Math.sin(angle);
+                        ball.trail = [];
+                    }
+
+                    bounces++;
+                    lastBounced = i; // FIX: update after sides changes
+
+                    const col = colors[sides % colors.length];
+                    spawnParticles(result.closestX, result.closestY, col);
+                    flashAlpha = 1.0;
+                    flashColor = col;
+
+                    document.getElementById('sideCount').textContent = sides;
+                    document.getElementById('speedDisplay').textContent = speedMultiplier.toFixed(1);
+                    document.getElementById('bounceCount').textContent = bounces;
+
+                    break;
+                }
+            }
+
+            polyAngle += 0.003;
+            updateParticles();
+        }
+
+        function draw() {
+            drawBackground();
+            drawFlash();
+
+            const verts = getPolygonVertices(sides, polyRadius, polyAngle);
+            drawPolygon(verts, lastBounced);
+            drawParticles();
+            drawBall();
+        }
+
+        function loop() {
+            update();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        loop();
+    </script>
+</body>
+</html>

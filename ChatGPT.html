@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Growing Polygon Ball Animation</title>
+<style>
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    body {
+        overflow: hidden;
+        background: #050505;
+        font-family: Arial, sans-serif;
+    }
+
+    canvas {
+        display: block;
+    }
+
+    .hud {
+        position: fixed;
+        top: 20px;
+        left: 20px;
+        color: white;
+        font-size: 16px;
+        background: rgba(255,255,255,0.08);
+        padding: 12px 18px;
+        border-radius: 12px;
+        backdrop-filter: blur(6px);
+        border: 1px solid rgba(255,255,255,0.1);
+    }
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<div class="hud">
+    <div>Sides: <span id="sides">3</span></div>
+    <div>Speed: <span id="speed">4.00</span></div>
+    <div>Bounces: <span id="bounces">0</span></div>
+</div>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+const sidesEl = document.getElementById("sides");
+const speedEl = document.getElementById("speed");
+const bounceEl = document.getElementById("bounces");
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener("resize", resize);
+
+const center = {
+    x: () => canvas.width / 2,
+    y: () => canvas.height / 2
+};
+
+let polygonSides = 3;
+let polygonRadius = 230;
+let bounces = 0;
+
+const ball = {
+    x: center.x(),
+    y: center.y(),
+    radius: 10,
+    vx: 3.2,
+    vy: -2.7,
+    glow: 25
+};
+
+function createPolygonVertices(sides, radius) {
+    const vertices = [];
+    const angleStep = (Math.PI * 2) / sides;
+
+    for (let i = 0; i < sides; i++) {
+        const angle = angleStep * i - Math.PI / 2;
+
+        vertices.push({
+            x: center.x() + Math.cos(angle) * radius,
+            y: center.y() + Math.sin(angle) * radius
+        });
+    }
+
+    return vertices;
+}
+
+function drawPolygon(vertices) {
+    ctx.beginPath();
+    ctx.moveTo(vertices[0].x, vertices[0].y);
+
+    for (let i = 1; i < vertices.length; i++) {
+        ctx.lineTo(vertices[i].x, vertices[i].y);
+    }
+
+    ctx.closePath();
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 3;
+    ctx.shadowColor = "white";
+    ctx.shadowBlur = 10;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+}
+
+function drawBall() {
+    ctx.beginPath();
+
+    const gradient = ctx.createRadialGradient(
+        ball.x,
+        ball.y,
+        0,
+        ball.x,
+        ball.y,
+        ball.radius + ball.glow
+    );
+
+    gradient.addColorStop(0, "#ffffff");
+    gradient.addColorStop(0.2, "#7df9ff");
+    gradient.addColorStop(1, "rgba(0,255,255,0)");
+
+    ctx.fillStyle = gradient;
+    ctx.arc(ball.x, ball.y, ball.radius + ball.glow, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.fillStyle = "#8ffcff";
+    ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+function reflectVelocity(normalX, normalY) {
+    const dot = ball.vx * normalX + ball.vy * normalY;
+
+    ball.vx = ball.vx - 2 * dot * normalX;
+    ball.vy = ball.vy - 2 * dot * normalY;
+}
+
+function collisionCheck(vertices) {
+    for (let i = 0; i < vertices.length; i++) {
+
+        const a = vertices[i];
+        const b = vertices[(i + 1) % vertices.length];
+
+        const edgeX = b.x - a.x;
+        const edgeY = b.y - a.y;
+
+        const length = Math.hypot(edgeX, edgeY);
+
+        const nx = -edgeY / length;
+        const ny = edgeX / length;
+
+        const px = ball.x - a.x;
+        const py = ball.y - a.y;
+
+        const distance = px * nx + py * ny;
+
+        if (distance > -ball.radius) {
+
+            reflectVelocity(nx, ny);
+
+            // Push ball inward to avoid sticking
+            ball.x -= (distance + ball.radius) * nx;
+            ball.y -= (distance + ball.radius) * ny;
+
+            // Speed increase
+            ball.vx *= 1.05;
+            ball.vy *= 1.05;
+
+            // Add polygon side
+            polygonSides++;
+
+            bounces++;
+
+            sidesEl.textContent = polygonSides;
+            bounceEl.textContent = bounces;
+            speedEl.textContent =
+                Math.hypot(ball.vx, ball.vy).toFixed(2);
+
+            return;
+        }
+    }
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const vertices = createPolygonVertices(
+        polygonSides,
+        polygonRadius
+    );
+
+    // Update ball
+    ball.x += ball.vx;
+    ball.y += ball.vy;
+
+    collisionCheck(vertices);
+
+    drawPolygon(vertices);
+    drawBall();
+}
+
+animate();
+</script>
+
+</body>
+</html>

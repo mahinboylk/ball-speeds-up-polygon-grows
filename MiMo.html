@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polygon Bounce</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400&family=Syne:wght@700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #06060e;
+    height: 100vh;
+    overflow: hidden;
+    cursor: crosshair;
+  }
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.04;
+    pointer-events: none;
+    z-index: 10;
+  }
+  canvas { display: block; position: relative; z-index: 1; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(() => {
+  const C = document.getElementById('c');
+  const ctx = C.getContext('2d');
+  let W, H, cx, cy, R, bgImg;
+
+  function resize() {
+    W = C.width = innerWidth;
+    H = C.height = innerHeight;
+    cx = W / 2;
+    cy = H / 2;
+    R = Math.min(W, H) * 0.36;
+    buildBG();
+  }
+
+  function buildBG() {
+    bgImg = document.createElement('canvas');
+    bgImg.width = W;
+    bgImg.height = H;
+    const bg = bgImg.getContext('2d');
+    const g = bg.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.7);
+    g.addColorStop(0, '#0d0d1c');
+    g.addColorStop(0.5, '#08080f');
+    g.addColorStop(1, '#05050a');
+    bg.fillStyle = g;
+    bg.fillRect(0, 0, W, H);
+
+    for (let r = 45; r < Math.max(W, H); r += 45) {
+      bg.beginPath();
+      bg.arc(cx, cy, r, 0, Math.PI * 2);
+      bg.strokeStyle = 'rgba(255,255,255,0.007)';
+      bg.lineWidth = 1;
+      bg.stroke();
+    }
+
+    for (let i = 0; i < 8; i++) {
+      const a = (Math.PI * 2 * i) / 8;
+      bg.beginPath();
+      bg.moveTo(cx, cy);
+      bg.lineTo(cx + Math.cos(a) * Math.max(W, H), cy + Math.sin(a) * Math.max(W, H));
+      bg.strokeStyle = 'rgba(255,255,255,0.004)';
+      bg.lineWidth = 1;
+      bg.stroke();
+    }
+  }
+
+  resize();
+  addEventListener('resize', resize);
+
+  // ── State ──
+  let sides = 3;
+  let speed = 2.8;
+  const BALL = 7;
+  const MAX_SPEED = 14;
+
+  let bx, by, vx, vy;
+  function initBall() {
+    bx = cx; by = cy;
+    const a = Math.random() * Math.PI * 2;
+    vx = Math.cos(a) * speed;
+    vy = Math.sin(a) * speed;
+  }
+  initBall();
+
+  let trail = [];
+  let particles = [];
+  let ripples = [];
+  let flash = 0;
+  let startTime = performance.now();
+
+  const NAMES = {
+    3:'TRIANGLE', 4:'SQUARE', 5:'PENTAGON', 6:'HEXAGON',
+    7:'HEPTAGON', 8:'OCTAGON', 9:'NONAGON', 10:'DECAGON',
+    11:'HENDECAGON', 12:'DODECAGON', 13:'TRIDECAGON',
+    14:'TETRADECAGON', 15:'PENTADECAGON', 16:'HEXADECAGON',
+    20:'ICOSAGON', 24:'ICOSITETRAGON', 100:'HECTOGON'
+  };
+
+  // ── Helpers ──
+  const hue = n => ((n - 3) * 47 + 15) % 360;
+
+  function getVerts(n) {
+    const v = [];
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI / 2 + (2 * Math.PI * i) / n;
+      v.push({ x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) });
+    }
+    return v;
+  }
+
+  function closestPt(px, py, ax, ay, bx_, by_) {
+    const dx = bx_ - ax, dy = by_ - ay;
+    const l2 = dx * dx + dy * dy;
+    if (l2 < 0.001) return { x: ax, y: ay };
+    const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / l2));
+    return { x: ax + t * dx, y: ay + t * dy };
+  }
+
+  // ── Collision ──
+  function collide() {
+    const v = getVerts(sides);
+    for (let i = 0; i < sides; i++) {
+      const a = v[i], b = v[(i + 1) % sides];
+      const cp = closestPt(bx, by, a.x, a.y, b.x, b.y);
+      const dx = bx - cp.x, dy = by - cp.y;
+      const d = Math.hypot(dx, dy);
+      if (d < BALL) {
+        const ex = b.x - a.x, ey = b.y - a.y;
+        let nx = -ey, ny = ex;
+        const l = Math.hypot(nx, ny);
+        nx /= l; ny /= l;
+        if (nx * (cx - (a.x + b.x) / 2) + ny * (cy - (a.y + b.y) / 2) < 0) {
+          nx = -nx; ny = -ny;
+        }
+        const dv = vx * nx + vy * ny;
+        if (dv >= 0) continue;
+
+        vx -= 2 * dv * nx;
+        vy -= 2 * dv * ny;
+        bx = cp.x + nx * (BALL + 0.5);
+        by = cp.y + ny * (BALL + 0.5);
+
+        const h = hue(sides);
+
+        for (let p = 0; p < 16; p++) {
+          const pa = Math.random() * Math.PI * 2;
+          const ps = Math.random() * 3.5 + 0.5;
+          particles.push({
+            x: cp.x, y: cp.y,
+            vx: nx * 2 + Math.cos(pa) * ps,
+            vy: ny * 2 + Math.sin(pa) * ps,
+            life: 1, h, size: Math.random() * 2 + 1.5
+          });
+        }
+
+        ripples.push({ x: cp.x, y: cp.y, r: 5, life: 1, h });
+
+        speed = Math.min(speed + 0.35, MAX_SPEED);
+        const ang = Math.atan2(vy, vx);
+        vx = Math.cos(ang) * speed;
+        vy = Math.sin(ang) * speed;
+
+        sides++;
+        flash = 1;
+        break;
+      }
+    }
+  }
+
+  // ── Drawing ──
+  function drawPoly() {
+    const v = getVerts(sides);
+    const h = hue(sides);
+    const path = new Path2D();
+    path.moveTo(v[0].x, v[0].y);
+    for (let i = 1; i < sides; i++) path.lineTo(v[i].x, v[i].y);
+    path.closePath();
+
+    ctx.save();
+    ctx.shadowColor = `hsla(${h},80%,60%,0.3)`;
+    ctx.shadowBlur = 40;
+    ctx.strokeStyle = `hsla(${h},80%,55%,0.1)`;
+    ctx.lineWidth = 6;
+    ctx.stroke(path);
+    ctx.restore();
+
+    ctx.save();
+    ctx.shadowColor = `hsla(${h},80%,60%,0.5)`;
+    ctx.shadowBlur = 14;
+    ctx.strokeStyle = `hsla(${h},80%,65%,0.4)`;
+    ctx.lineWidth = 2;
+    ctx.stroke(path);
+    ctx.restore();
+
+    ctx.save();
+    ctx.shadowColor = `hsla(${h},90%,80%,0.6)`;
+    ctx.shadowBlur = 5;
+    ctx.strokeStyle = `hsla(${h},80%,82%,0.85)`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke(path);
+    ctx.restore();
+
+    ctx.fillStyle = `hsla(${h},80%,50%,0.015)`;
+    ctx.fill(path);
+
+    if (flash > 0.01) {
+      ctx.fillStyle = `hsla(${h},90%,75%,${flash * 0.1})`;
+      ctx.fill(path);
+      flash *= 0.87;
+    }
+
+    // Vertex dots
+    for (let i = 0; i < sides; i++) {
+      ctx.beginPath();
+      ctx.arc(v[i].x, v[i].y, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${h},80%,80%,0.5)`;
+      ctx.fill();
+    }
+  }
+
+  function drawTrail() {
+    const len = trail.length;
+    for (let i = 0; i < len; i++) {
+      const t = trail[i];
+      const f = i / len;
+      ctx.beginPath();
+      ctx.arc(t.x, t.y, BALL * f * 0.6, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${t.h},55%,72%,${f * 0.22})`;
+      ctx.fill();
+    }
+  }
+
+  function drawRipples() {
+    for (let i = ripples.length - 1; i >= 0; i--) {
+      const rp = ripples[i];
+      rp.r += 2.8;
+      rp.life -= 0.02;
+      if (rp.life <= 0) { ripples.splice(i, 1); continue; }
+      ctx.beginPath();
+      ctx.arc(rp.x, rp.y, rp.r, 0, Math.PI * 2);
+      ctx.strokeStyle = `hsla(${rp.h},80%,60%,${rp.life * 0.2})`;
+      ctx.lineWidth = 1.5 * rp.life;
+      ctx.stroke();
+    }
+  }
+
+  function drawParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx; p.y += p.vy;
+      p.vx *= 0.97; p.vy *= 0.97;
+      p.vy += 0.015;
+      p.life -= 0.015;
+      if (p.life <= 0) { particles.splice(i, 1); continue; }
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${p.h},80%,65%,${p.life * 0.65})`;
+      ctx.fill();
+    }
+  }
+
+  function drawBall() {
+    ctx.save();
+    ctx.shadowColor = 'rgba(255,255,255,0.5)';
+    ctx.shadowBlur = 20;
+    ctx.beginPath();
+    ctx.arc(bx, by, BALL, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.restore();
+
+    ctx.beginPath();
+    ctx.arc(bx, by, BALL * 0.4, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+  }
+
+  function drawHUD() {
+    const h = hue(sides);
+    const name = NAMES[sides] || `${sides}-GON`;
+
+    ctx.save();
+
+    ctx.font = '300 11px "DM Mono", monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    ctx.textAlign = 'left';
+    ctx.fillText(`SIDES  ${sides}`, 24, 30);
+    ctx.fillText(`SPEED  ${speed.toFixed(1)}`, 24, 47);
+
+    ctx.textAlign = 'right';
+    ctx.font = '700 22px "Syne", sans-serif';
+    ctx.fillStyle = `hsla(${h},80%,60%,0.5)`;
+    ctx.fillText(name, W - 24, 34);
+    ctx.font = '300 9px "DM Mono", monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillText(`REGULAR ${sides}-SIDED POLYGON`, W - 24, 50);
+
+    const elapsed = (performance.now() - startTime) / 1000;
+    if (elapsed < 7) {
+      const alpha = Math.max(0, 1 - elapsed / 6) * 0.25;
+      ctx.font = '300 10px "DM Mono", monospace';
+      ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+      ctx.textAlign = 'center';
+      ctx.fillText('CLICK ANYWHERE TO RESET', cx, H - 28);
+    }
+
+    ctx.restore();
+  }
+
+  // ── Loop ──
+  function frame() {
+    ctx.drawImage(bgImg, 0, 0);
+
+    bx += vx;
+    by += vy;
+    collide();
+
+    trail.push({ x: bx, y: by, h: hue(sides) });
+    if (trail.length > 45) trail.shift();
+
+    if (Math.hypot(bx - cx, by - cy) > R + 80) {
+      bx = cx; by = cy;
+      const a = Math.random() * Math.PI * 2;
+      vx = Math.cos(a) * speed;
+      vy = Math.sin(a) * speed;
+    }
+
+    drawTrail();
+    drawPoly();
+    drawRipples();
+    drawParticles();
+    drawBall();
+    drawHUD();
+
+    requestAnimationFrame(frame);
+  }
+
+  C.addEventListener('click', () => {
+    sides = 3;
+    speed = 2.8;
+    trail = [];
+    particles = [];
+    ripples = [];
+    flash = 0;
+    startTime = performance.now();
+    initBall();
+  });
+
+  frame();
+})();
+</script>
+</body>
+</html>
